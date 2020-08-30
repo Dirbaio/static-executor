@@ -6,14 +6,14 @@ lazy_static::lazy_static! {
 }
 
 #[no_mangle]
-pub fn _static_executor_signal() {
+pub extern "C" fn static_executor_signal() {
     let mut signaled = MUTEX.lock().unwrap();
     *signaled = true;
     CONDVAR.notify_one();
 }
 
 #[no_mangle]
-pub fn _static_executor_wait() {
+pub extern "C" fn static_executor_wait() {
     let mut signaled = MUTEX.lock().unwrap();
     while !*signaled {
         signaled = CONDVAR.wait(signaled).unwrap();

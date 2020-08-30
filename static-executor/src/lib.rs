@@ -72,9 +72,9 @@ pub enum SpawnError {
 //=============
 // Extern functions for signaling the executor thread that it has work to do
 
-extern "Rust" {
-    fn _static_executor_signal();
-    fn _static_executor_wait();
+extern "C" {
+    fn static_executor_signal();
+    fn static_executor_wait();
 }
 
 //=============
@@ -102,7 +102,7 @@ unsafe fn enqueue(item: *mut Header) {
 
     if prev.is_null() {
         // signal to the processing thread that the queue is no longer empty.
-        _static_executor_signal();
+        static_executor_signal();
     }
 }
 
@@ -112,7 +112,7 @@ unsafe fn process_queue(on_task: impl Fn(*mut Header)) {
 
         if task.is_null() {
             // Queue is empty, wait
-            _static_executor_wait();
+            static_executor_wait();
         }
 
         while !task.is_null() {
