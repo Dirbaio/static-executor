@@ -106,7 +106,7 @@ unsafe fn enqueue(item: *mut Header) {
     }
 }
 
-unsafe fn process_queue(on_task: impl Fn(*mut Header)) {
+unsafe fn process_queue(on_task: impl Fn(*mut Header)) -> ! {
     loop {
         let mut task = QUEUE_HEAD.swap(ptr::null_mut(), Ordering::AcqRel);
 
@@ -212,7 +212,7 @@ impl<F: Future + 'static> Task<F> {
 
 unsafe impl<F: Future + 'static> Sync for Task<F> {}
 
-pub unsafe fn run() {
+pub unsafe fn run() -> ! {
     process_queue(|p| unsafe {
         let header = &*p;
 
