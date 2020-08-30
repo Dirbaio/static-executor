@@ -4,5 +4,8 @@ version = "0.1.0"
 authors = ["Dario Nieuwenhuis <dirbaio@dirbaio.net>"]
 edition = "2018"
 
+[dependencies]
+static-executor-macros = { path = "../static-executor-macros" }
+
 [dev-dependencies]
 async-io = "0.2.6"
