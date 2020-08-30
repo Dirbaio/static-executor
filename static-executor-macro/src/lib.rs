@@ -89,7 +89,7 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
     let result = quote! {
         #task_fn
         #[allow(non_camel_case_types)]
-        type #future_type_name = impl ::core::future::Future + Send + 'static;
+        type #future_type_name = impl ::core::future::Future + 'static;
 
         fn #create_fn_name(#args) -> #future_type_name {
             #task_fn_name(#arg_names)
@@ -101,7 +101,7 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #pool_type_name {
-            pub fn spawn(&'static self, #args) -> ::core::result::Result<(), ::static_executor::SpawnError> {
+            pub unsafe fn spawn(&'static self, #args) -> ::core::result::Result<(), ::static_executor::SpawnError> {
                 unsafe { ::static_executor::Task::spawn(&self.inner, || #create_fn_name(#arg_names)) }
             }
         }
