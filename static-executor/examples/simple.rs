@@ -1,6 +1,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_in_array_repeat_expressions)]
 
+extern crate static_executor_std;
+
 use async_io::Timer;
 use static_executor::{run, task};
 use std::time::Duration;
@@ -28,5 +30,5 @@ async fn tick() {
 
 fn main() {
     tick.spawn().unwrap();
-    run()
+    unsafe { run() }
 }

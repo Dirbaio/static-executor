@@ -2,4 +2,6 @@
 members = [
     'static-executor',
     'static-executor-macro',
+    'static-executor-std',
+    'static-executor-cortex-m',
 ]

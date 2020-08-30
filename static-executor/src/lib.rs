@@ -70,6 +70,14 @@ pub enum SpawnError {
 }
 
 //=============
+// Extern functions for signaling the executor thread that it has work to do
+
+extern "Rust" {
+    fn _static_executor_signal();
+    fn _static_executor_wait();
+}
+
+//=============
 // Atomic task queue using a very, very simple lock-free linked-list queue:
 //
 // To enqueue a task, task.next is set to the old head, and head is atomically set to task.
@@ -82,10 +90,10 @@ pub enum SpawnError {
 
 static QUEUE_HEAD: AtomicPtr<Header> = AtomicPtr::new(ptr::null_mut());
 
-fn enqueue(item: *mut Header) {
+unsafe fn enqueue(item: *mut Header) {
     let mut prev = QUEUE_HEAD.load(Ordering::Acquire);
     loop {
-        unsafe { (*item).next.store(prev, Ordering::Relaxed) };
+        (*item).next.store(prev, Ordering::Relaxed);
         match QUEUE_HEAD.compare_exchange_weak(prev, item, Ordering::AcqRel, Ordering::Acquire) {
             Ok(_) => break,
             Err(next_prev) => prev = next_prev,
@@ -93,26 +101,23 @@ fn enqueue(item: *mut Header) {
     }
 
     if prev.is_null() {
-        // TODO: signal to the processing thread that the queue is no longer empty.
-        // - bare metal: SEV
-        // - RTOS: give a semaphore
+        // signal to the processing thread that the queue is no longer empty.
+        _static_executor_signal();
     }
 }
 
-fn process_queue(on_task: impl Fn(*mut Header)) {
+unsafe fn process_queue(on_task: impl Fn(*mut Header)) {
     loop {
         let mut task = QUEUE_HEAD.swap(ptr::null_mut(), Ordering::AcqRel);
 
         if task.is_null() {
-            // Queue is empty
-            // TODO: somehow sleep, in order to not spin the CPU:
-            // - for bare metal: WFE
-            // - for RTOS: take a semaphore
+            // Queue is empty, wait
+            _static_executor_wait();
         }
 
         while !task.is_null() {
             on_task(task);
-            task = unsafe { (*task).next.load(Ordering::Relaxed) };
+            task = (*task).next.load(Ordering::Relaxed);
         }
     }
 }
@@ -207,7 +212,7 @@ impl<F: Future + 'static> Task<F> {
 
 unsafe impl<F: Future + 'static> Sync for Task<F> {}
 
-pub fn run() {
+pub unsafe fn run() {
     process_queue(|p| unsafe {
         let header = &*p;
 

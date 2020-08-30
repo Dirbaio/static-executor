@@ -9,3 +9,4 @@ static-executor-macro = { version = "0.1.0", path = "../static-executor-macro" }
 
 [dev-dependencies]
 async-io = "0.2.6"
+static-executor-std = { version = "0.1.0", path = "../static-executor-std" }
