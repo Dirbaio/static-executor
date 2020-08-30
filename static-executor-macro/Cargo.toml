@@ -1,5 +1,5 @@
 [package]
-name = "static-executor-macros"
+name = "static-executor-macro"
 version = "0.1.0"
 authors = ["Dario Nieuwenhuis <dirbaio@dirbaio.net>"]
 edition = "2018"

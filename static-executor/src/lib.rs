@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 // Reexport task proc_macro
-pub use static_executor_macros::task;
+pub use static_executor_macro::task;
 
 //=============
 // UninitCell
