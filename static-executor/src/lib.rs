@@ -65,6 +65,7 @@ pub struct Task<F: Future + 'static> {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum SpawnError {
     Busy,
 }
@@ -125,7 +126,8 @@ unsafe fn process_queue(on_task: impl Fn(*mut Header)) -> ! {
 //=============
 // Waker
 
-static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone, waker_wake, waker_wake, waker_drop);
+static WAKER_VTABLE: RawWakerVTable =
+    RawWakerVTable::new(waker_clone, waker_wake, waker_wake, waker_drop);
 
 unsafe fn waker_clone(p: *const ()) -> RawWaker {
     RawWaker::new(p, &WAKER_VTABLE)
@@ -176,10 +178,18 @@ impl<F: Future + 'static> Task<F> {
         }
     }
 
-    pub unsafe fn spawn(pool: &'static [Self], future: impl FnOnce() -> F) -> Result<(), SpawnError> {
+    pub unsafe fn spawn(
+        pool: &'static [Self],
+        future: impl FnOnce() -> F,
+    ) -> Result<(), SpawnError> {
         for task in pool {
             let state = STATE_RUNNING | STATE_QUEUED;
-            if task.header.state.compare_and_swap(0, state, Ordering::AcqRel) == 0 {
+            if task
+                .header
+                .state
+                .compare_and_swap(0, state, Ordering::AcqRel)
+                == 0
+            {
                 // Initialize the task
                 task.header.poll_fn.write(Self::poll);
                 task.future.write(future());
@@ -203,7 +213,9 @@ impl<F: Future + 'static> Task<F> {
         match future.poll(&mut cx) {
             Poll::Ready(_) => {
                 this.future.drop_in_place();
-                this.header.state.fetch_and(!STATE_RUNNING, Ordering::AcqRel);
+                this.header
+                    .state
+                    .fetch_and(!STATE_RUNNING, Ordering::AcqRel);
             }
             Poll::Pending => {}
         }
