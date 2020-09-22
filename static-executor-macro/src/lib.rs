@@ -29,7 +29,12 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut fail = false;
     if task_fn.sig.asyncness.is_none() {
-        task_fn.sig.span().unwrap().error("task functions must be async").emit();
+        task_fn
+            .sig
+            .span()
+            .unwrap()
+            .error("task functions must be async")
+            .emit();
         fail = true;
     }
     if task_fn.sig.generics.params.len() != 0 {
@@ -42,11 +47,14 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
         fail = true;
     }
     if pool_size < 1 {
-        Span::call_site().error("pool_size must be 1 or greater").emit();
+        Span::call_site()
+            .error("pool_size must be 1 or greater")
+            .emit();
         fail = true
     }
 
-    let mut arg_names: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]> = syn::punctuated::Punctuated::new();
+    let mut arg_names: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]> =
+        syn::punctuated::Punctuated::new();
     let args = &task_fn.sig.inputs;
 
     for arg in args.iter() {
