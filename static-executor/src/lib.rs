@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(const_fn)]
 
+use core::cell::Cell;
 use core::cell::UnsafeCell;
 use core::future::Future;
 use core::mem::MaybeUninit;
@@ -53,6 +54,7 @@ const STATE_QUEUED: u32 = 1 << 1;
 struct Header {
     state: AtomicU32,
     next: AtomicPtr<Header>,
+    executor: Cell<*const Executor>,
     poll_fn: UninitCell<unsafe fn(*mut Header)>, // Valid if STATE_RUNNING
 }
 
@@ -89,36 +91,49 @@ extern "C" {
 // Note that batches will be iterated in the opposite order as they were enqueued. This should
 // be OK for our use case. Hopefully it doesn't create executor fairness problems.
 
-static QUEUE_HEAD: AtomicPtr<Header> = AtomicPtr::new(ptr::null_mut());
-
-unsafe fn enqueue(item: *mut Header) {
-    let mut prev = QUEUE_HEAD.load(Ordering::Acquire);
-    loop {
-        (*item).next.store(prev, Ordering::Relaxed);
-        match QUEUE_HEAD.compare_exchange_weak(prev, item, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => break,
-            Err(next_prev) => prev = next_prev,
-        }
-    }
-
-    if prev.is_null() {
-        // signal to the processing thread that the queue is no longer empty.
-        static_executor_signal();
-    }
+struct Queue {
+    head: AtomicPtr<Header>,
 }
 
-unsafe fn process_queue(on_task: impl Fn(*mut Header)) -> ! {
-    loop {
-        let mut task = QUEUE_HEAD.swap(ptr::null_mut(), Ordering::AcqRel);
+impl Queue {
+    const fn new() -> Self {
+        Self {
+            head: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
 
-        if task.is_null() {
-            // Queue is empty, wait
-            static_executor_wait();
+    unsafe fn enqueue(&self, item: *mut Header) {
+        let mut prev = self.head.load(Ordering::Acquire);
+        loop {
+            (*item).next.store(prev, Ordering::Relaxed);
+            match self
+                .head
+                .compare_exchange_weak(prev, item, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(next_prev) => prev = next_prev,
+            }
         }
 
-        while !task.is_null() {
-            on_task(task);
-            task = (*task).next.load(Ordering::Relaxed);
+        if prev.is_null() {
+            // signal to the processing thread that the queue is no longer empty.
+            static_executor_signal();
+        }
+    }
+
+    unsafe fn dequeue_all(&self, on_task: impl Fn(*mut Header)) {
+        loop {
+            let mut task = self.head.swap(ptr::null_mut(), Ordering::AcqRel);
+
+            if task.is_null() {
+                // Queue is empty, we're done
+                return;
+            }
+
+            while !task.is_null() {
+                on_task(task);
+                task = (*task).next.load(Ordering::Relaxed);
+            }
         }
     }
 }
@@ -156,7 +171,8 @@ unsafe fn waker_wake(p: *const ()) {
     }
 
     // We have just marked the task as scheduled, so enqueue it.
-    enqueue(p as *mut Header);
+    let executor = &*header.executor.get();
+    executor.queue.enqueue(p as *mut Header);
 }
 
 unsafe fn waker_drop(_: *const ()) {
@@ -164,7 +180,7 @@ unsafe fn waker_drop(_: *const ()) {
 }
 
 //=============
-// Executor
+// Task
 
 impl<F: Future + 'static> Task<F> {
     pub const fn new() -> Self {
@@ -172,6 +188,7 @@ impl<F: Future + 'static> Task<F> {
             header: Header {
                 state: AtomicU32::new(0),
                 next: AtomicPtr::new(ptr::null_mut()),
+                executor: Cell::new(ptr::null()),
                 poll_fn: UninitCell::uninit(),
             },
             future: UninitCell::uninit(),
@@ -179,6 +196,7 @@ impl<F: Future + 'static> Task<F> {
     }
 
     pub unsafe fn spawn(
+        executor: &'static Executor,
         pool: &'static [Self],
         future: impl FnOnce() -> F,
     ) -> Result<(), SpawnError> {
@@ -192,10 +210,11 @@ impl<F: Future + 'static> Task<F> {
             {
                 // Initialize the task
                 task.header.poll_fn.write(Self::poll);
+                task.header.executor.set(executor);
                 task.future.write(future());
 
                 // Enqueue it
-                enqueue(&task.header as *const _ as _);
+                executor.queue.enqueue(&task.header as *const _ as _);
 
                 return Ok(());
             }
@@ -224,21 +243,42 @@ impl<F: Future + 'static> Task<F> {
 
 unsafe impl<F: Future + 'static> Sync for Task<F> {}
 
-pub unsafe fn run() -> ! {
-    process_queue(|p| unsafe {
-        let header = &*p;
+//=============
+// Executor
 
-        let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
-        if state & STATE_RUNNING == 0 {
-            // If task is not running, ignore it. This can happen in the following scenario:
-            //   - Task gets dequeued, poll starts
-            //   - While task is being polled, it gets woken. It gets placed in the queue.
-            //   - Task poll finishes, returning done=true
-            //   - RUNNING bit is cleared, but the task is already in the queue.
-            return;
+pub struct Executor {
+    queue: Queue,
+}
+
+impl Executor {
+    pub const fn new() -> Self {
+        Self {
+            queue: Queue::new(),
         }
+    }
 
-        // Run the task
-        header.poll_fn.read()(p as _);
-    })
+    pub unsafe fn run(&self) -> ! {
+        unsafe {
+            loop {
+                self.queue.dequeue_all(|p| {
+                    let header = &*p;
+
+                    let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
+                    if state & STATE_RUNNING == 0 {
+                        // If task is not running, ignore it. This can happen in the following scenario:
+                        //   - Task gets dequeued, poll starts
+                        //   - While task is being polled, it gets woken. It gets placed in the queue.
+                        //   - Task poll finishes, returning done=true
+                        //   - RUNNING bit is cleared, but the task is already in the queue.
+                        return;
+                    }
+
+                    // Run the task
+                    header.poll_fn.read()(p as _);
+                });
+
+                static_executor_wait();
+            }
+        }
+    }
 }

@@ -4,7 +4,7 @@
 extern crate static_executor_std;
 
 use async_io::Timer;
-use static_executor::{run, task};
+use static_executor::{task, Executor};
 use std::time::Duration;
 
 #[task(pool_size = 4)]
@@ -19,7 +19,7 @@ async fn tick() {
     let mut i = 1;
     loop {
         println!("tick! {}", i);
-        match unsafe { work.spawn(i) } {
+        match unsafe { work.spawn(&EXECUTOR, i) } {
             Ok(_) => println!("worker spawned"),
             Err(e) => println!("failed to spawn worker: {:?}", e),
         }
@@ -28,9 +28,11 @@ async fn tick() {
     }
 }
 
+static EXECUTOR: Executor = Executor::new();
+
 fn main() {
     unsafe {
-        tick.spawn().unwrap();
-        run()
-    }
+        tick.spawn(&EXECUTOR).unwrap();
+        EXECUTOR.run();
+    };
 }

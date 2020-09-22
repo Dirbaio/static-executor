@@ -109,8 +109,8 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #pool_type_name {
-            pub unsafe fn spawn(&'static self, #args) -> ::core::result::Result<(), ::static_executor::SpawnError> {
-                unsafe { ::static_executor::Task::spawn(&self.inner, || #create_fn_name(#arg_names)) }
+            pub unsafe fn spawn(&'static self, executor: &'static ::static_executor::Executor, #args) -> ::core::result::Result<(), ::static_executor::SpawnError> {
+                unsafe { ::static_executor::Task::spawn(executor, &self.inner, || #create_fn_name(#arg_names)) }
             }
         }
 
