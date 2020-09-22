@@ -19,7 +19,7 @@ async fn tick() {
     let mut i = 1;
     loop {
         println!("tick! {}", i);
-        match work.spawn(i) {
+        match unsafe { work.spawn(i) } {
             Ok(_) => println!("worker spawned"),
             Err(e) => println!("failed to spawn worker: {:?}", e),
         }
@@ -29,6 +29,8 @@ async fn tick() {
 }
 
 fn main() {
-    tick.spawn().unwrap();
-    unsafe { run() }
+    unsafe {
+        tick.spawn().unwrap();
+        run()
+    }
 }
