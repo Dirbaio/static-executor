@@ -85,8 +85,8 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let name = task_fn.sig.ident.clone();
 
-    let future_type_name = format_ident!("__static_executor_futtype_{}", name);
-    let pool_type_name = format_ident!("__static_executor_pooltype_{}", name);
+    let type_name = format_ident!("__static_executor_type_{}", name);
+    let pool_name = format_ident!("__static_executor_pool_{}", name);
     let task_fn_name = format_ident!("__static_executor_task_{}", name);
     let create_fn_name = format_ident!("__static_executor_create_{}", name);
 
@@ -97,25 +97,18 @@ pub fn task(args: TokenStream, item: TokenStream) -> TokenStream {
     let result = quote! {
         #task_fn
         #[allow(non_camel_case_types)]
-        type #future_type_name = impl ::core::future::Future + 'static;
+        type #type_name = impl ::core::future::Future + 'static;
 
-        fn #create_fn_name(#args) -> #future_type_name {
+        fn #create_fn_name(#args) -> #type_name {
             #task_fn_name(#arg_names)
         }
 
-        #[allow(non_camel_case_types)]
-        #visibility struct #pool_type_name {
-            inner: [::static_executor::Task<#future_type_name>; #pool_size],
-        }
-
-        impl #pool_type_name {
-            pub unsafe fn spawn(&'static self, executor: &'static ::static_executor::Executor, #args) -> ::core::result::Result<(), ::static_executor::SpawnError> {
-                unsafe { ::static_executor::Task::spawn(executor, &self.inner, || #create_fn_name(#arg_names)) }
-            }
-        }
-
         #[allow(non_upper_case_globals)]
-        #visibility static #name: #pool_type_name = #pool_type_name{ inner: [::static_executor::Task::new(); #pool_size] };
+        static #pool_name: [::static_executor::Task<#type_name>; #pool_size] = [::static_executor::Task::new(); #pool_size];
+
+        #visibility fn #name(#args) -> ::static_executor::SpawnToken {
+            unsafe { ::static_executor::Task::spawn(&#pool_name, || #create_fn_name(#arg_names)) }
+        }
     };
     result.into()
 }

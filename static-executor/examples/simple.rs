@@ -19,7 +19,7 @@ async fn tick() {
     let mut i = 1;
     loop {
         println!("tick! {}", i);
-        match unsafe { work.spawn(&EXECUTOR, i) } {
+        match unsafe { EXECUTOR.spawn(work(i)) } {
             Ok(_) => println!("worker spawned"),
             Err(e) => println!("failed to spawn worker: {:?}", e),
         }
@@ -32,7 +32,7 @@ static EXECUTOR: Executor = Executor::new();
 
 fn main() {
     unsafe {
-        tick.spawn(&EXECUTOR).unwrap();
+        EXECUTOR.spawn(tick()).unwrap();
         EXECUTOR.run();
-    };
+    }
 }

@@ -4,9 +4,11 @@
 use core::cell::Cell;
 use core::cell::UnsafeCell;
 use core::future::Future;
+use core::mem;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::ptr;
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
@@ -195,11 +197,7 @@ impl<F: Future + 'static> Task<F> {
         }
     }
 
-    pub unsafe fn spawn(
-        executor: &'static Executor,
-        pool: &'static [Self],
-        future: impl FnOnce() -> F,
-    ) -> Result<(), SpawnError> {
+    pub unsafe fn spawn(pool: &'static [Self], future: impl FnOnce() -> F) -> SpawnToken {
         for task in pool {
             let state = STATE_RUNNING | STATE_QUEUED;
             if task
@@ -210,17 +208,15 @@ impl<F: Future + 'static> Task<F> {
             {
                 // Initialize the task
                 task.header.poll_fn.write(Self::poll);
-                task.header.executor.set(executor);
                 task.future.write(future());
 
-                // Enqueue it
-                executor.queue.enqueue(&task.header as *const _ as _);
-
-                return Ok(());
+                return SpawnToken {
+                    header: Some(NonNull::new_unchecked(&task.header as *const Header as _)),
+                };
             }
         }
 
-        return Err(SpawnError::Busy);
+        return SpawnToken { header: None };
     }
 
     unsafe fn poll(p: *mut Header) {
@@ -244,6 +240,20 @@ impl<F: Future + 'static> Task<F> {
 unsafe impl<F: Future + 'static> Sync for Task<F> {}
 
 //=============
+// Spawn token
+
+pub struct SpawnToken {
+    header: Option<NonNull<Header>>,
+}
+
+impl Drop for SpawnToken {
+    fn drop(&mut self) {
+        // TODO maybe we can deallocate the task instead.
+        panic!("Please do not drop SpawnToken instances")
+    }
+}
+
+//=============
 // Executor
 
 pub struct Executor {
@@ -257,28 +267,47 @@ impl Executor {
         }
     }
 
-    pub unsafe fn run(&self) -> ! {
-        unsafe {
-            loop {
-                self.queue.dequeue_all(|p| {
-                    let header = &*p;
+    /// Spawn a future on this executor.
+    ///
+    /// safety: can only be called from the executor thread
+    pub unsafe fn spawn(&self, token: SpawnToken) -> Result<(), SpawnError> {
+        let header = token.header;
+        mem::forget(token);
 
-                    let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
-                    if state & STATE_RUNNING == 0 {
-                        // If task is not running, ignore it. This can happen in the following scenario:
-                        //   - Task gets dequeued, poll starts
-                        //   - While task is being polled, it gets woken. It gets placed in the queue.
-                        //   - Task poll finishes, returning done=true
-                        //   - RUNNING bit is cleared, but the task is already in the queue.
-                        return;
-                    }
-
-                    // Run the task
-                    header.poll_fn.read()(p as _);
-                });
-
-                static_executor_wait();
+        match header {
+            Some(header) => {
+                let header = header.as_ref();
+                header.executor.set(self);
+                self.queue.enqueue(header as *const _ as _);
+                Ok(())
             }
+            None => Err(SpawnError::Busy),
+        }
+    }
+
+    /// Runs the executor.
+    ///
+    /// safety: can only be called from the executor thread
+    pub unsafe fn run(&self) {
+        loop {
+            self.queue.dequeue_all(|p| {
+                let header = &*p;
+
+                let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
+                if state & STATE_RUNNING == 0 {
+                    // If task is not running, ignore it. This can happen in the following scenario:
+                    //   - Task gets dequeued, poll starts
+                    //   - While task is being polled, it gets woken. It gets placed in the queue.
+                    //   - Task poll finishes, returning done=true
+                    //   - RUNNING bit is cleared, but the task is already in the queue.
+                    return;
+                }
+
+                // Run the task
+                header.poll_fn.read()(p as _);
+            });
+
+            static_executor_wait()
         }
     }
 }
