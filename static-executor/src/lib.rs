@@ -242,6 +242,7 @@ unsafe impl<F: Future + 'static> Sync for Task<F> {}
 //=============
 // Spawn token
 
+#[must_use = "Calling a task function does nothing on its own. To spawn a task, pass the result to Executor::spawn()"]
 pub struct SpawnToken {
     header: Option<NonNull<Header>>,
 }
