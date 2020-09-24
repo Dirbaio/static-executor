@@ -269,7 +269,7 @@ impl Executor {
     /// Spawn a future on this executor.
     ///
     /// safety: can only be called from the executor thread
-    pub unsafe fn spawn(&self, token: SpawnToken) -> Result<(), SpawnError> {
+    pub unsafe fn spawn(&'static self, token: SpawnToken) -> Result<(), SpawnError> {
         let header = token.header;
         mem::forget(token);
 
