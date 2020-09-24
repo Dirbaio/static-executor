@@ -75,14 +75,6 @@ pub enum SpawnError {
 }
 
 //=============
-// Extern functions for signaling the executor thread that it has work to do
-
-extern "C" {
-    fn static_executor_signal();
-    fn static_executor_wait();
-}
-
-//=============
 // Atomic task queue using a very, very simple lock-free linked-list queue:
 //
 // To enqueue a task, task.next is set to the old head, and head is atomically set to task.
@@ -104,7 +96,8 @@ impl Queue {
         }
     }
 
-    unsafe fn enqueue(&self, item: *mut Header) {
+    /// Enqueues an item. Returns true if the queue was empty.
+    unsafe fn enqueue(&self, item: *mut Header) -> bool {
         let mut prev = self.head.load(Ordering::Acquire);
         loop {
             (*item).next.store(prev, Ordering::Relaxed);
@@ -117,10 +110,7 @@ impl Queue {
             }
         }
 
-        if prev.is_null() {
-            // signal to the processing thread that the queue is no longer empty.
-            static_executor_signal();
-        }
+        prev.is_null()
     }
 
     unsafe fn dequeue_all(&self, on_task: impl Fn(*mut Header)) {
@@ -174,7 +164,7 @@ unsafe fn waker_wake(p: *const ()) {
 
     // We have just marked the task as scheduled, so enqueue it.
     let executor = &*header.executor.get();
-    executor.queue.enqueue(p as *mut Header);
+    executor.enqueue(p as *mut Header);
 }
 
 unsafe fn waker_drop(_: *const ()) {
@@ -259,12 +249,20 @@ impl Drop for SpawnToken {
 
 pub struct Executor {
     queue: Queue,
+    signal_fn: fn(),
 }
 
 impl Executor {
-    pub const fn new() -> Self {
+    pub const fn new(signal_fn: fn()) -> Self {
         Self {
             queue: Queue::new(),
+            signal_fn: signal_fn,
+        }
+    }
+
+    unsafe fn enqueue(&self, item: *mut Header) {
+        if self.queue.enqueue(item) {
+            (self.signal_fn)()
         }
     }
 
@@ -279,36 +277,32 @@ impl Executor {
             Some(header) => {
                 let header = header.as_ref();
                 header.executor.set(self);
-                self.queue.enqueue(header as *const _ as _);
+                self.enqueue(header as *const _ as _);
                 Ok(())
             }
             None => Err(SpawnError::Busy),
         }
     }
 
-    /// Runs the executor.
+    /// Runs the executor until the queue is empty.
     ///
     /// safety: can only be called from the executor thread
     pub unsafe fn run(&self) {
-        loop {
-            self.queue.dequeue_all(|p| {
-                let header = &*p;
+        self.queue.dequeue_all(|p| {
+            let header = &*p;
 
-                let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
-                if state & STATE_RUNNING == 0 {
-                    // If task is not running, ignore it. This can happen in the following scenario:
-                    //   - Task gets dequeued, poll starts
-                    //   - While task is being polled, it gets woken. It gets placed in the queue.
-                    //   - Task poll finishes, returning done=true
-                    //   - RUNNING bit is cleared, but the task is already in the queue.
-                    return;
-                }
+            let state = header.state.fetch_and(!STATE_QUEUED, Ordering::AcqRel);
+            if state & STATE_RUNNING == 0 {
+                // If task is not running, ignore it. This can happen in the following scenario:
+                //   - Task gets dequeued, poll starts
+                //   - While task is being polled, it gets woken. It gets placed in the queue.
+                //   - Task poll finishes, returning done=true
+                //   - RUNNING bit is cleared, but the task is already in the queue.
+                return;
+            }
 
-                // Run the task
-                header.poll_fn.read()(p as _);
-            });
-
-            static_executor_wait()
-        }
+            // Run the task
+            header.poll_fn.read()(p as _);
+        });
     }
 }

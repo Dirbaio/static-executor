@@ -5,12 +5,6 @@ without `std` or `alloc`.
 
 See examples/simple.rs for usage example.
 
-To-Do list:
-
-- safety hole: add a check so that run() cannot be invoked from several threads concurrently.
-- Return "pool full" errors from spawn (it currently panics)
-- The macros are not very ergonomic, maybe attribute macros would be nicer: `#[task]` and `#[task_pool(4)]`.
-
 Missing features (still undecided if they're in-scope of this project):
 
 - Add JoinHandles. Allows awaiting one task from another.

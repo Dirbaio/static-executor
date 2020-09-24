@@ -1,8 +1,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(const_in_array_repeat_expressions)]
 
-extern crate static_executor_std;
-
 use async_io::Timer;
 use static_executor::{task, Executor};
 use std::time::Duration;
@@ -28,11 +26,34 @@ async fn tick() {
     }
 }
 
-static EXECUTOR: Executor = Executor::new();
+static EXECUTOR: Executor = Executor::new(executor_signal);
+use std::sync::{Condvar, Mutex};
+
+lazy_static::lazy_static! {
+    static ref MUTEX: Mutex<bool> = Mutex::new(false);
+    static ref CONDVAR: Condvar = Condvar::new();
+}
+
+fn executor_signal() {
+    let mut signaled = MUTEX.lock().unwrap();
+    *signaled = true;
+    CONDVAR.notify_one();
+}
+
+fn executor_wait() {
+    let mut signaled = MUTEX.lock().unwrap();
+    while !*signaled {
+        signaled = CONDVAR.wait(signaled).unwrap();
+    }
+    *signaled = false
+}
 
 fn main() {
     unsafe {
         EXECUTOR.spawn(tick()).unwrap();
-        EXECUTOR.run();
+        loop {
+            EXECUTOR.run();
+            executor_wait();
+        }
     }
 }

@@ -1,8 +1,0 @@
-[package]
-name = "static-executor-std"
-version = "0.1.0"
-authors = ["Dario Nieuwenhuis <dirbaio@dirbaio.net>"]
-edition = "2018"
-
-[dependencies]
-lazy_static = "1.4.0"

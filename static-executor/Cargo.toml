@@ -11,3 +11,4 @@ defmt = { version = "0.1.0", optional = true }
 [dev-dependencies]
 async-io = "0.2.6"
 static-executor-std = { version = "0.1.0", path = "../static-executor-std" }
+lazy_static = "1.4.0"

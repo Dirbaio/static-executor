@@ -1,8 +1,0 @@
-[package]
-name = "static-executor-cortex-m"
-version = "0.1.0"
-authors = ["Dario Nieuwenhuis <dirbaio@dirbaio.net>"]
-edition = "2018"
-
-[dependencies]
-cortex-m = "0.6.3"
