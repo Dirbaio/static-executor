@@ -1,3 +1,9 @@
+# READ THIS
+
+This repo is now unmaintained.
+
+The executor design lives on as part of [embassy](https://github.com/akiles/embassy). The version there has many fixes and improvements not present in this repo.
+
 # static-executor
 
 Proof of concept of a Rust async executor that statically allocates tasks. Ideal for embedded devices, works
